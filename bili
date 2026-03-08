@@ -1,0 +1,2 @@
+#!/bin/bash
+/Users/kujin/Projects/bilibili/.venv/bin/python3 /Users/kujin/Projects/bilibili/download.py "$1"
