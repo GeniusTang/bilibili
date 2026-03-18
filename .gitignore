@@ -1,4 +1,7 @@
+__pycache__/
 .venv/
 *.mp4
 cookies.txt
 .DS_Store
+downloads/
+.secret_key

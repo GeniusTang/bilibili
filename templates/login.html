@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bilibili - 登录</title>
+    <script src="https://static.geetest.com/static/js/gt.0.4.9.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f4f5f7;
+            color: #333;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            max-width: 420px;
+            width: 90%;
+        }
+        .login-card h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+            color: #00a1d6;
+        }
+        .login-card > p { color: #999; margin-bottom: 20px; }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #f0f0f0;
+            margin-bottom: 24px;
+        }
+        .tab {
+            flex: 1;
+            padding: 10px;
+            cursor: pointer;
+            font-size: 15px;
+            color: #999;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+        .tab:hover { color: #666; }
+        .tab.active { color: #00a1d6; border-bottom-color: #00a1d6; font-weight: 600; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* QR code tab */
+        #qr-container {
+            width: 220px;
+            height: 220px;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #fafafa;
+            border-radius: 8px;
+        }
+        #qr-container img { width: 200px; height: 200px; }
+        #status {
+            font-size: 14px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: inline-block;
+        }
+        .status-waiting { background: #fff3e0; color: #e65100; }
+        .status-scanned { background: #e8f5e9; color: #2e7d32; }
+        .status-expired { background: #fce4ec; color: #c62828; }
+        .status-success { background: #e8f5e9; color: #2e7d32; }
+        #refresh-btn {
+            display: none;
+            margin-top: 16px;
+            padding: 8px 24px;
+            background: #00a1d6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        #refresh-btn:hover { background: #0091c2; }
+
+        /* Password tab */
+        .form-group {
+            margin-bottom: 16px;
+            text-align: left;
+        }
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 6px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus { border-color: #00a1d6; }
+        #captcha-box {
+            margin: 16px 0;
+            min-height: 44px;
+        }
+        #login-btn {
+            width: 100%;
+            padding: 10px;
+            background: #00a1d6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #login-btn:hover { background: #0091c2; }
+        #login-btn:disabled { background: #b0dfe9; cursor: default; }
+        #login-error {
+            color: #ff4d4f;
+            font-size: 13px;
+            margin-top: 12px;
+            display: none;
+        }
+        #login-success {
+            color: #52c41a;
+            font-size: 13px;
+            margin-top: 12px;
+            display: none;
+        }
+
+        /* SMS verification */
+        .sms-row {
+            display: flex;
+            gap: 8px;
+        }
+        .sms-row input { flex: 1; }
+        .sms-row button {
+            padding: 10px 14px;
+            background: #00a1d6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        .sms-row button:disabled { background: #b0dfe9; cursor: default; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h1>Bilibili 收藏夹</h1>
+        <p>登录你的B站账号</p>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('qr')">扫码登录</div>
+            <div class="tab" onclick="switchTab('password')">密码登录</div>
+        </div>
+
+        <!-- QR Code Tab -->
+        <div class="tab-panel active" id="panel-qr">
+            <div id="qr-container">
+                <span style="color:#999">加载中...</span>
+            </div>
+            <div id="status" class="status-waiting">等待扫码</div>
+            <br>
+            <button id="refresh-btn" onclick="generateQR()">刷新二维码</button>
+        </div>
+
+        <!-- Password Tab -->
+        <div class="tab-panel" id="panel-password">
+            <!-- Step 1: Username + Password + Captcha -->
+            <form id="login-form" onsubmit="return handleLogin(event)">
+                <div class="form-group">
+                    <label>手机号 / 邮箱</label>
+                    <input type="text" id="username" placeholder="请输入手机号或邮箱" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="password" placeholder="请输入密码" autocomplete="current-password">
+                </div>
+                <div id="captcha-box">
+                    <span style="color:#999; font-size:13px">加载验证码中...</span>
+                </div>
+                <button type="submit" id="login-btn" disabled>登录</button>
+                <div id="login-error"></div>
+                <div id="login-success"></div>
+            </form>
+
+            <!-- Step 2: SMS verification (shown when risk detected) -->
+            <div id="sms-verify" style="display:none">
+                <p style="color:#666; font-size:14px; margin-bottom:16px;">登录环境存在风险，需要短信验证</p>
+                <div class="form-group">
+                    <label>短信验证码</label>
+                    <div class="sms-row">
+                        <input type="text" id="sms-code" placeholder="请输入验证码" maxlength="6" autocomplete="one-time-code">
+                        <button type="button" id="send-sms-btn" onclick="sendSmsCode()">发送验证码</button>
+                    </div>
+                </div>
+                <button id="verify-btn" onclick="verifySmsCode()" style="width:100%;padding:10px;background:#00a1d6;color:white;border:none;border-radius:6px;font-size:15px;cursor:pointer;">验证并登录</button>
+                <div id="sms-error" style="color:#ff4d4f;font-size:13px;margin-top:12px;display:none"></div>
+                <div id="sms-success" style="color:#52c41a;font-size:13px;margin-top:12px;display:none"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ── Tab switching ──
+        let activeTab = 'qr';
+        function switchTab(tab) {
+            activeTab = tab;
+            document.querySelectorAll('.tab').forEach((el, i) => {
+                el.classList.toggle('active', (i === 0 && tab === 'qr') || (i === 1 && tab === 'password'));
+            });
+            document.getElementById('panel-qr').classList.toggle('active', tab === 'qr');
+            document.getElementById('panel-password').classList.toggle('active', tab === 'password');
+
+            if (tab === 'qr') {
+                generateQR();
+            } else {
+                if (pollTimer) clearInterval(pollTimer);
+                initCaptcha();
+            }
+        }
+
+        // ── QR Code Login ──
+        let pollTimer = null;
+        let qrcodeKey = null;
+
+        async function generateQR() {
+            document.getElementById('qr-container').innerHTML = '<span style="color:#999">加载中...</span>';
+            document.getElementById('status').textContent = '等待扫码';
+            document.getElementById('status').className = 'status-waiting';
+            document.getElementById('refresh-btn').style.display = 'none';
+            if (pollTimer) clearInterval(pollTimer);
+
+            const resp = await fetch('/api/qrcode/generate');
+            const data = await resp.json();
+            if (data.error) {
+                document.getElementById('qr-container').innerHTML = '<span style="color:red">生成失败</span>';
+                return;
+            }
+            qrcodeKey = data.qrcode_key;
+            document.getElementById('qr-container').innerHTML =
+                `<img src="data:image/png;base64,${data.qr_image}" alt="QR Code">`;
+            pollTimer = setInterval(pollStatus, 2000);
+        }
+
+        async function pollStatus() {
+            if (!qrcodeKey) return;
+            const resp = await fetch(`/api/qrcode/poll?qrcode_key=${qrcodeKey}`);
+            const data = await resp.json();
+
+            const el = document.getElementById('status');
+            switch (data.status) {
+                case 86101:
+                    el.textContent = '等待扫码';
+                    el.className = 'status-waiting';
+                    break;
+                case 86090:
+                    el.textContent = '已扫码，请在手机上确认';
+                    el.className = 'status-scanned';
+                    break;
+                case 86038:
+                    el.textContent = '二维码已过期';
+                    el.className = 'status-expired';
+                    document.getElementById('refresh-btn').style.display = 'inline-block';
+                    clearInterval(pollTimer);
+                    break;
+                case 0:
+                    el.textContent = '登录成功！正在跳转...';
+                    el.className = 'status-success';
+                    clearInterval(pollTimer);
+                    setTimeout(() => window.location.href = '/favorites', 1000);
+                    break;
+            }
+        }
+
+        // ── Password Login with GeeTest Captcha ──
+        let captchaToken = null;
+        let captchaResult = null;
+        let captchaInited = false;
+
+        async function initCaptcha() {
+            if (captchaInited) return;
+            captchaInited = true;
+
+            const resp = await fetch('/api/captcha');
+            const data = await resp.json();
+            if (data.error) {
+                document.getElementById('captcha-box').innerHTML =
+                    '<span style="color:red; font-size:13px">验证码加载失败</span>';
+                return;
+            }
+
+            captchaToken = data.token;
+
+            initGeetest({
+                gt: data.gt,
+                challenge: data.challenge,
+                offline: false,
+                new_captcha: true,
+                product: 'bind',
+                width: '100%',
+            }, function(captchaObj) {
+                captchaObj.onReady(function() {
+                    document.getElementById('captcha-box').innerHTML = '';
+                    const triggerBtn = document.createElement('button');
+                    triggerBtn.type = 'button';
+                    triggerBtn.textContent = '点击完成验证';
+                    triggerBtn.style.cssText = 'width:100%;padding:10px;background:#f0f0f0;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:14px;color:#666;';
+                    triggerBtn.onclick = () => captchaObj.verify();
+                    document.getElementById('captcha-box').appendChild(triggerBtn);
+                });
+
+                captchaObj.onSuccess(function() {
+                    const result = captchaObj.getValidate();
+                    captchaResult = {
+                        challenge: result.geetest_challenge,
+                        validate: result.geetest_validate,
+                        seccode: result.geetest_seccode,
+                    };
+                    const box = document.getElementById('captcha-box');
+                    box.innerHTML = '<span style="color:#52c41a; font-size:13px">&#10003; 验证成功</span>';
+                    document.getElementById('login-btn').disabled = false;
+                });
+
+                captchaObj.onError(function() {
+                    document.getElementById('captcha-box').innerHTML =
+                        '<span style="color:red; font-size:13px">验证失败，请刷新页面重试</span>';
+                });
+            });
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const errorEl = document.getElementById('login-error');
+            const successEl = document.getElementById('login-success');
+            errorEl.style.display = 'none';
+            successEl.style.display = 'none';
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                errorEl.textContent = '请输入用户名和密码';
+                errorEl.style.display = 'block';
+                return false;
+            }
+            if (!captchaResult) {
+                errorEl.textContent = '请先完成验证码';
+                errorEl.style.display = 'block';
+                return false;
+            }
+
+            const btn = document.getElementById('login-btn');
+            btn.disabled = true;
+            btn.textContent = '登录中...';
+
+            try {
+                const resp = await fetch('/api/login/password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        username,
+                        password,
+                        token: captchaToken,
+                        challenge: captchaResult.challenge,
+                        validate: captchaResult.validate,
+                        seccode: captchaResult.seccode,
+                    }),
+                });
+                const data = await resp.json();
+
+                if (data.success) {
+                    successEl.textContent = '登录成功！正在跳转...';
+                    successEl.style.display = 'block';
+                    setTimeout(() => window.location.href = '/favorites', 1000);
+                } else if (data.need_verify) {
+                    // Risk detected — show SMS verification step
+                    document.getElementById('login-form').style.display = 'none';
+                    document.getElementById('sms-verify').style.display = 'block';
+                } else {
+                    errorEl.textContent = data.error || '登录失败';
+                    errorEl.style.display = 'block';
+                    btn.disabled = false;
+                    btn.textContent = '登录';
+                    // Reset captcha for retry
+                    captchaInited = false;
+                    captchaResult = null;
+                    document.getElementById('captcha-box').innerHTML =
+                        '<span style="color:#999; font-size:13px">加载验证码中...</span>';
+                    initCaptcha();
+                }
+            } catch (err) {
+                errorEl.textContent = '网络错误，请重试';
+                errorEl.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = '登录';
+            }
+            return false;
+        }
+
+        // ── SMS Verification ──
+        async function sendSmsCode() {
+            const btn = document.getElementById('send-sms-btn');
+            const errorEl = document.getElementById('sms-error');
+            errorEl.style.display = 'none';
+            btn.disabled = true;
+
+            try {
+                const resp = await fetch('/api/login/sms/send', { method: 'POST' });
+                const data = await resp.json();
+                if (data.error) {
+                    errorEl.textContent = data.error;
+                    errorEl.style.display = 'block';
+                    btn.disabled = false;
+                    return;
+                }
+                // Countdown
+                let sec = 60;
+                btn.textContent = `${sec}s`;
+                const timer = setInterval(() => {
+                    sec--;
+                    btn.textContent = `${sec}s`;
+                    if (sec <= 0) {
+                        clearInterval(timer);
+                        btn.textContent = '重新发送';
+                        btn.disabled = false;
+                    }
+                }, 1000);
+            } catch {
+                errorEl.textContent = '发送失败，请重试';
+                errorEl.style.display = 'block';
+                btn.disabled = false;
+            }
+        }
+
+        async function verifySmsCode() {
+            const code = document.getElementById('sms-code').value.trim();
+            const errorEl = document.getElementById('sms-error');
+            const successEl = document.getElementById('sms-success');
+            errorEl.style.display = 'none';
+            successEl.style.display = 'none';
+
+            if (!code) {
+                errorEl.textContent = '请输入验证码';
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            const verifyBtn = document.getElementById('verify-btn');
+            verifyBtn.disabled = true;
+            verifyBtn.textContent = '验证中...';
+
+            try {
+                const resp = await fetch('/api/login/sms/verify', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ code }),
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    successEl.textContent = '登录成功！正在跳转...';
+                    successEl.style.display = 'block';
+                    setTimeout(() => window.location.href = '/favorites', 1000);
+                } else {
+                    errorEl.textContent = data.error || '验证失败';
+                    errorEl.style.display = 'block';
+                    verifyBtn.disabled = false;
+                    verifyBtn.textContent = '验证并登录';
+                }
+            } catch {
+                errorEl.textContent = '网络错误，请重试';
+                errorEl.style.display = 'block';
+                verifyBtn.disabled = false;
+                verifyBtn.textContent = '验证并登录';
+            }
+        }
+
+        // Start with QR code tab
+        generateQR();
+    </script>
+</body>
+</html>

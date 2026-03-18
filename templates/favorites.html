@@ -1,0 +1,1293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bilibili - 我的收藏</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f4f5f7;
+            color: #333;
+        }
+        nav {
+            background: #00a1d6;
+            color: white;
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        nav h1 { font-size: 18px; }
+        nav a { color: white; text-decoration: none; font-size: 14px; opacity: 0.85; }
+        nav a:hover { opacity: 1; }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Folders sidebar */
+        .layout {
+            display: flex;
+            gap: 20px;
+        }
+        .sidebar {
+            width: 240px;
+            flex-shrink: 0;
+        }
+        .folder-list {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            position: sticky;
+            top: 68px;
+        }
+        .folder-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.15s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .folder-item:hover { background: #f8f9fa; }
+        .folder-item.active { background: #e6f7ff; color: #00a1d6; font-weight: 600; }
+        .folder-item .count {
+            font-size: 12px;
+            color: #999;
+            background: #f0f0f0;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+        .folder-item.active .count { background: #bae7ff; color: #0091c2; }
+
+        /* Video grid */
+        .main { flex: 1; min-width: 0; }
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 16px;
+        }
+        .video-card {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .video-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .video-card.invalid { opacity: 0.5; }
+        .thumb-wrap {
+            position: relative;
+            padding-top: 62.5%;
+            background: #eee;
+        }
+        .thumb-wrap img, .thumb-wrap iframe {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            border: none;
+        }
+
+        /* Enlarged preview overlay */
+        .preview-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 200;
+            justify-content: center;
+            align-items: center;
+        }
+        .preview-overlay.open { display: flex; }
+        .preview-player {
+            width: 720px;
+            max-width: 90vw;
+            aspect-ratio: 16/9;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+            position: relative;
+        }
+        .preview-player iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .preview-close {
+            position: absolute;
+            top: -36px;
+            right: 0;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+        }
+        .play-btn {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px; height: 40px;
+            background: rgba(0,0,0,0.55);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            cursor: pointer;
+            z-index: 3;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        .thumb-wrap:hover .play-btn { opacity: 1; }
+        .play-btn:hover { background: rgba(0,161,214,0.8); }
+        .duration-badge {
+            position: absolute;
+            bottom: 6px; right: 6px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            font-size: 12px;
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+        .invalid-badge {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.6);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .video-info {
+            padding: 10px 12px;
+        }
+        .video-title {
+            font-size: 14px;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-bottom: 6px;
+        }
+        .video-meta {
+            font-size: 12px;
+            color: #999;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .download-btn {
+            padding: 4px 12px;
+            background: #00a1d6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .download-btn:hover { background: #0091c2; }
+        .download-btn:disabled { background: #ccc; cursor: default; }
+        .download-btn.done { background: #52c41a; }
+        .download-btn.error { background: #ff4d4f; }
+        .download-btn.cancelled { background: #999; }
+        .cancel-btn {
+            padding: 4px 8px;
+            background: #ff4d4f;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            margin-left: 4px;
+        }
+        .cancel-btn:hover { background: #e33; }
+        .download-stats {
+            font-size: 10px;
+            color: #888;
+            padding: 0 12px 4px;
+            line-height: 1.4;
+        }
+
+        .load-more {
+            text-align: center;
+            padding: 20px;
+        }
+        .load-more button {
+            padding: 8px 32px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .load-more button:hover { border-color: #00a1d6; color: #00a1d6; }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .video-dates {
+            font-size: 11px;
+            color: #aaa;
+            padding: 0 12px 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            line-height: 1.5;
+            min-height: 37px;
+        }
+
+        /* Video stream info */
+        .video-stream-info {
+            font-size: 11px;
+            color: #999;
+            padding: 0 12px 8px;
+            line-height: 1.5;
+            min-height: 36px;
+        }
+        .video-stream-info .quality-tag {
+            display: inline-block;
+            background: #f0f0f0;
+            padding: 1px 6px;
+            border-radius: 3px;
+            margin-right: 4px;
+            font-size: 10px;
+        }
+
+        /* Checkbox for multi-select */
+        .video-card .select-check {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            z-index: 10;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            accent-color: #00a1d6;
+        }
+
+        /* Batch bar */
+        .batch-bar {
+            background: white;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .batch-bar .info { font-size: 14px; color: #666; }
+        .batch-bar .info strong { color: #333; }
+        .batch-bar .actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .batch-bar .selected-info {
+            font-size: 13px;
+            color: #00a1d6;
+        }
+
+        /* Date filter bar */
+        .filter-bar {
+            background: white;
+            border-radius: 8px;
+            padding: 10px 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            flex-wrap: wrap;
+        }
+        .filter-bar label { color: #666; white-space: nowrap; }
+        .filter-bar select, .filter-bar input[type="date"] {
+            padding: 5px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .filter-bar input[type="date"] { width: 140px; }
+        .filter-bar .filter-btn {
+            padding: 5px 14px;
+            background: #00a1d6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .filter-bar .filter-btn:hover { background: #0091c2; }
+        .filter-bar .filter-btn.secondary {
+            background: white;
+            color: #666;
+            border: 1px solid #ddd;
+        }
+        .filter-bar .filter-btn.secondary:hover { border-color: #00a1d6; color: #00a1d6; }
+
+        /* Settings bar */
+        .settings-bar {
+            background: white;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 14px;
+        }
+        .settings-bar label { color: #666; white-space: nowrap; }
+        .settings-bar .dir-display {
+            flex: 1;
+            padding: 6px 10px;
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #333;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .settings-bar button {
+            padding: 6px 16px;
+            background: #00a1d6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        .settings-bar button:hover { background: #0091c2; }
+
+        /* Folder picker modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 200;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: white;
+            border-radius: 10px;
+            width: 500px;
+            max-width: 90vw;
+            max-height: 70vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+        }
+        .modal-header {
+            padding: 14px 18px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+        }
+        .modal-header .close-btn {
+            background: none; border: none; font-size: 20px; cursor: pointer; color: #999;
+        }
+        .modal-shortcuts {
+            padding: 10px 18px;
+            display: flex;
+            gap: 8px;
+            border-bottom: 1px solid #eee;
+            background: #fafafa;
+        }
+        .modal-shortcuts button {
+            padding: 4px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            font-size: 12px;
+            color: #555;
+        }
+        .modal-shortcuts button:hover { border-color: #00a1d6; color: #00a1d6; }
+        .modal-search {
+            padding: 8px 18px;
+            border-bottom: 1px solid #eee;
+        }
+        .modal-search input {
+            width: 100%;
+            padding: 7px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            outline: none;
+        }
+        .modal-search input:focus { border-color: #00a1d6; }
+        .modal-path {
+            padding: 10px 18px;
+            font-size: 12px;
+            color: #666;
+            background: #f8f9fa;
+            border-bottom: 1px solid #eee;
+            word-break: break-all;
+        }
+        .modal-body {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 200px;
+        }
+        .dir-item {
+            padding: 10px 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            border-bottom: 1px solid #f5f5f5;
+        }
+        .dir-item:hover { background: #f0f7ff; }
+        .dir-item.parent-dir { color: #00a1d6; font-weight: 500; }
+        .dir-item .icon { font-size: 16px; width: 20px; text-align: center; }
+        .modal-footer {
+            padding: 12px 18px;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .modal-footer button {
+            padding: 7px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            border: 1px solid #ddd;
+            background: white;
+        }
+        .modal-footer button.primary {
+            background: #00a1d6;
+            color: white;
+            border-color: #00a1d6;
+        }
+        .modal-footer button.primary:hover { background: #0091c2; }
+
+        .scroll-buttons {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 150;
+        }
+        .scroll-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #00a1d6;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .scroll-btn:hover { background: #0091c2; }
+
+        @media (max-width: 768px) {
+            .layout { flex-direction: column; }
+            .sidebar { width: 100%; }
+            .folder-list { position: static; display: flex; overflow-x: auto; }
+            .folder-item { white-space: nowrap; border-bottom: none; border-right: 1px solid #f0f0f0; }
+            .video-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <h1>我的收藏夹</h1>
+        <a href="/api/logout">退出登录</a>
+    </nav>
+
+    <div class="container">
+        <div class="layout">
+            <div class="sidebar">
+                <div class="folder-list" id="folder-list">
+                    <div class="folder-item" style="color:#999; justify-content:center;">加载中...</div>
+                </div>
+            </div>
+            <div class="main">
+                <div class="settings-bar">
+                    <label>下载目录:</label>
+                    <span class="dir-display" id="download-dir-display">加载中...</span>
+                    <button onclick="openFolderPicker()">选择目录</button>
+                </div>
+                <div class="filter-bar" id="search-bar" style="display:none">
+                    <label>搜索:</label>
+                    <input type="text" id="video-search" placeholder="搜索标题或UP主..." style="flex:1; padding:5px 8px; border:1px solid #ddd; border-radius:4px; font-size:13px;" oninput="debouncedSearch()">
+                    <span id="search-result" style="color:#999;"></span>
+                </div>
+                <div class="filter-bar" id="filter-bar" style="display:none">
+                    <label>筛选:</label>
+                    <select id="filter-type">
+                        <option value="fav_time">收藏日期</option>
+                        <option value="pubtime">发布日期</option>
+                    </select>
+                    <input type="date" id="filter-start">
+                    <span>至</span>
+                    <input type="date" id="filter-end">
+                    <button class="filter-btn" onclick="applyFilter()">筛选</button>
+                    <button class="filter-btn secondary" onclick="clearFilter()">清除</button>
+                    <span id="filter-result" style="color:#999;"></span>
+                </div>
+                <div class="batch-bar" id="batch-bar" style="display:none">
+                    <div class="info">共 <strong id="total-count">0</strong> 个视频</div>
+                    <div class="actions">
+                        <span class="selected-info" id="selected-info"></span>
+                        <span class="selected-info" id="batch-stats"></span>
+                        <button class="download-btn" onclick="downloadSelected()">下载选中</button>
+                        <button class="download-btn" onclick="toggleSelectAll()">全选</button>
+                        <button class="download-btn" onclick="downloadAll()">下载全部</button>
+                        <label style="font-size:12px;color:#666;">同时下载:
+                            <select id="concurrency" style="padding:2px 4px;border:1px solid #ddd;border-radius:3px;font-size:12px;">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3" selected>3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                            </select>
+                        </label>
+                        <button class="download-btn error" id="cancel-all-btn" onclick="cancelBatch()" style="display:none">取消全部</button>
+                    </div>
+                </div>
+                <div class="video-grid" id="video-grid"></div>
+                <div class="load-more" id="load-more" style="display:none">
+                    <button onclick="loadMore()">加载更多</button>
+                </div>
+                <div class="empty-state" id="empty-state" style="display:none">
+                    <p>选择左侧的收藏夹查看视频</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="preview-overlay" id="preview-overlay" onclick="if(event.target===this)closePreview()">
+        <div class="preview-player" id="preview-player"></div>
+    </div>
+
+    <div class="scroll-buttons">
+        <button class="scroll-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="回到顶部">&uarr;</button>
+        <button class="scroll-btn" onclick="window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'})" title="跳到底部">&darr;</button>
+    </div>
+
+    <div class="modal-overlay" id="folder-picker-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <span>选择下载目录</span>
+                <button class="close-btn" onclick="closeFolderPicker()">&times;</button>
+            </div>
+            <div class="modal-shortcuts">
+                <button onclick="browseTo('/Volumes')">Volumes</button>
+                <button onclick="browseTo(homePath)">主目录</button>
+                <button onclick="browseTo(homePath + '/Downloads')">Downloads</button>
+                <button onclick="browseTo(homePath + '/Desktop')">Desktop</button>
+            </div>
+            <div class="modal-path" id="picker-path"></div>
+            <div class="modal-search">
+                <input type="text" id="picker-search" placeholder="搜索文件夹..." oninput="filterDirs()">
+            </div>
+            <div class="modal-body" id="picker-dirs"></div>
+            <div class="modal-footer">
+                <button onclick="closeFolderPicker()">取消</button>
+                <button class="primary" onclick="confirmFolderPicker()">选择此目录</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentFolder = null;
+        let currentPage = 1;
+        let hasMore = false;
+        let allVideos = [];
+        let selectedVideos = new Set();
+        let videoInfoCache = {};
+        let bvidToTaskId = {};
+        let batchCancelled = false;
+
+        async function loadFolders() {
+            const resp = await fetch('/api/favorites/folders');
+            const data = await resp.json();
+            if (data.error) {
+                alert('加载收藏夹失败: ' + data.error);
+                return;
+            }
+            const el = document.getElementById('folder-list');
+            el.innerHTML = data.folders.map(f => `
+                <div class="folder-item" data-id="${f.id}" onclick="selectFolder(${f.id}, this)">
+                    <span>${escHtml(f.title)}</span>
+                    <span class="count">${f.media_count}</span>
+                </div>
+            `).join('');
+        }
+
+        function selectFolder(folderId, el) {
+            document.querySelectorAll('.folder-item').forEach(e => e.classList.remove('active'));
+            el.classList.add('active');
+            currentFolder = folderId;
+            currentPage = 1;
+            allVideos = [];
+            selectedVideos.clear();
+            updateSelectedInfo();
+            document.getElementById('video-grid').innerHTML = '';
+            loadAllVideos();
+        }
+
+        async function loadAllVideos() {
+            // Load first page
+            const resp = await fetch(`/api/favorites/videos?folder_id=${currentFolder}&page=1`);
+            const data = await resp.json();
+            if (data.error) {
+                alert('加载视频失败: ' + data.error);
+                return;
+            }
+            allVideos = data.videos;
+            hasMore = data.has_more;
+            rerenderVideos();
+
+            // Load remaining pages in background
+            let page = 1;
+            while (hasMore) {
+                page++;
+                const r = await fetch(`/api/favorites/videos?folder_id=${currentFolder}&page=${page}`);
+                const d = await r.json();
+                if (d.error) break;
+                allVideos = allVideos.concat(d.videos);
+                hasMore = d.has_more;
+            }
+            hasMore = false;
+            document.getElementById('load-more').style.display = 'none';
+            rerenderVideos();
+        }
+
+        function updateBars() {
+            document.getElementById('load-more').style.display = hasMore ? 'block' : 'none';
+            document.getElementById('empty-state').style.display = allVideos.length === 0 ? 'block' : 'none';
+            document.getElementById('batch-bar').style.display = allVideos.length > 0 ? 'flex' : 'none';
+            document.getElementById('search-bar').style.display = allVideos.length > 0 ? 'flex' : 'none';
+            document.getElementById('filter-bar').style.display = allVideos.length > 0 ? 'flex' : 'none';
+            document.getElementById('total-count').textContent = allVideos.length;
+        }
+
+        function loadMore() {
+            currentPage++;
+            loadVideos();
+        }
+
+        function openPreview(bvid, event) {
+            event.preventDefault();
+            const overlay = document.getElementById('preview-overlay');
+            const container = document.getElementById('preview-player');
+            container.innerHTML = `
+                <button class="preview-close" onclick="closePreview()">&times;</button>
+                <iframe src="https://player.bilibili.com/player.html?bvid=${bvid}&autoplay=1&danmaku=0&high_quality=1"
+                    allow="autoplay; fullscreen" allowfullscreen></iframe>
+            `;
+            overlay.classList.add('open');
+        }
+
+        function closePreview() {
+            const overlay = document.getElementById('preview-overlay');
+            const container = document.getElementById('preview-player');
+            overlay.classList.remove('open');
+            container.innerHTML = '';
+        }
+
+        function renderCard(v) {
+            const isInvalid = v.attr === 9;
+            const dur = formatDuration(v.duration);
+            const videoUrl = `https://www.bilibili.com/video/${v.bvid}`;
+            return `
+                <div class="video-card ${isInvalid ? 'invalid' : ''}" id="card-${v.bvid}">
+                    <div class="thumb-wrap">
+                        ${isInvalid ? '' : `<input type="checkbox" class="select-check" data-bvid="${v.bvid}" onchange="toggleSelect('${v.bvid}', this.checked)">`}
+                        <a href="${videoUrl}" target="_blank" rel="noopener">
+                            <img src="${v.cover}@400w.webp" alt="" loading="lazy" referrerpolicy="no-referrer">
+                        </a>
+                        ${isInvalid ? '<div class="invalid-badge">已失效</div>' : `
+                            <div class="play-btn" onclick="openPreview('${v.bvid}', event)" title="预览播放">&#9654;</div>
+                            <div class="duration-badge">${dur}</div>
+                        `}
+                    </div>
+                    <div class="video-info">
+                        <div class="video-title" title="${escHtml(v.title)}"><a href="${videoUrl}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;">${escHtml(v.title)}</a></div>
+                        <div class="video-meta">
+                            <span>${escHtml(v.upper)}</span>
+                            ${isInvalid ? '' : `
+                                <span>
+                                    <button class="download-btn" id="btn-${v.bvid}" onclick="downloadVideo('${v.bvid}', this)">下载</button>
+                                    <button class="cancel-btn" id="cancel-${v.bvid}" onclick="cancelVideo('${v.bvid}')" style="display:none">取消</button>
+                                </span>
+                            `}
+                        </div>
+                        <div class="download-stats" id="stats-${v.bvid}"></div>
+                    </div>
+                    <div class="video-dates">
+                        ${v.pubtime ? `<span>发布: ${formatDate(v.pubtime)}</span>` : ''}
+                        ${v.fav_time ? `<span>收藏: ${formatDate(v.fav_time)}</span>` : ''}
+                    </div>
+                    ${isInvalid ? '' : `<div class="video-stream-info" id="info-${v.bvid}">加载画质信息...</div>`}
+                </div>
+            `;
+        }
+
+        async function downloadVideo(bvid, btn, fromBatch) {
+            if (!fromBatch && btn.disabled) return;
+            btn.disabled = true;
+            btn.textContent = '排队中...';
+            const cancelBtn = document.getElementById(`cancel-${bvid}`);
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+            const video = allVideos.find(v => v.bvid === bvid);
+            const resp = await fetch('/api/download', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ bvid, title: video?.title || bvid }),
+            });
+            const data = await resp.json();
+            if (data.error) {
+                btn.textContent = '失败';
+                btn.classList.add('error');
+                if (cancelBtn) cancelBtn.style.display = 'none';
+                return;
+            }
+            bvidToTaskId[bvid] = data.task_id;
+            pollDownload(data.task_id, bvid, btn);
+        }
+
+        async function cancelVideo(bvid) {
+            const taskId = bvidToTaskId[bvid];
+            if (!taskId) return;
+            await fetch(`/api/download/cancel/${taskId}`, { method: 'POST' });
+        }
+
+        async function pollDownload(taskId, bvid, btn) {
+            const cancelBtn = document.getElementById(`cancel-${bvid}`);
+            const statsEl = document.getElementById(`stats-${bvid}`);
+            const check = async () => {
+                const resp = await fetch(`/api/download/status/${taskId}`);
+                const task = await resp.json();
+
+                let statsText = '';
+                switch (task.status) {
+                    case 'starting':
+                        btn.textContent = '准备中...';
+                        break;
+                    case 'downloading':
+                        btn.textContent = `${Math.round(task.progress)}%`;
+                        if (task.speed) statsText += `速度: ${task.speed}`;
+                        if (task.eta) statsText += `  剩余: ${task.eta}`;
+                        break;
+                    case 'merging':
+                        btn.textContent = '合并中...';
+                        break;
+                    case 'done':
+                        btn.textContent = '已完成';
+                        btn.classList.add('done');
+                        if (cancelBtn) cancelBtn.style.display = 'none';
+                        if (statsEl) statsEl.textContent = '';
+                        return;
+                    case 'cancelled':
+                        btn.textContent = '已取消';
+                        btn.classList.add('cancelled');
+                        btn.disabled = false;
+                        btn.onclick = () => { btn.classList.remove('cancelled'); downloadVideo(bvid, btn); };
+                        if (cancelBtn) cancelBtn.style.display = 'none';
+                        if (statsEl) statsEl.textContent = '';
+                        return;
+                    case 'error':
+                        btn.textContent = '失败';
+                        btn.classList.add('error');
+                        btn.disabled = false;
+                        if (cancelBtn) cancelBtn.style.display = 'none';
+                        if (statsEl) statsEl.textContent = '';
+                        return;
+                }
+                if (statsEl) statsEl.textContent = statsText;
+                setTimeout(check, 1000);
+            };
+            check();
+        }
+
+        async function downloadAll() {
+            const visible = getVisibleVideos();
+            const bvids = visible.map(v => v.bvid);
+            await batchDownload(bvids);
+        }
+
+        let skippedBvids = new Set();
+
+        async function batchDownload(bvids) {
+            batchCancelled = false;
+            skippedBvids.clear();
+            const cancelAllBtn = document.getElementById('cancel-all-btn');
+            const batchStatsEl = document.getElementById('batch-stats');
+            const concurrency = parseInt(document.getElementById('concurrency').value) || 3;
+            cancelAllBtn.style.display = 'inline-block';
+
+            const toDownload = bvids
+                .map(bvid => ({ bvid, btn: document.getElementById(`btn-${bvid}`) }))
+                .filter(x => x.btn && !x.btn.classList.contains('done'));
+
+            // Mark all as queued with cancel buttons visible
+            for (const { bvid, btn } of toDownload) {
+                btn.disabled = true;
+                btn.textContent = '排队中...';
+                const cancelBtn = document.getElementById(`cancel-${bvid}`);
+                if (cancelBtn) {
+                    cancelBtn.style.display = 'inline-block';
+                    cancelBtn.onclick = () => {
+                        skippedBvids.add(bvid);
+                        btn.textContent = '已取消';
+                        btn.classList.add('cancelled');
+                        btn.disabled = false;
+                        btn.onclick = () => { btn.classList.remove('cancelled'); downloadVideo(bvid, btn); };
+                        cancelBtn.style.display = 'none';
+                        const statsEl = document.getElementById(`stats-${bvid}`);
+                        if (statsEl) statsEl.textContent = '';
+                    };
+                }
+            }
+
+            const total = toDownload.length;
+            let completed = 0;
+            let activeProgress = {};  // {bvid: progress%}
+            const batchStartTime = Date.now();
+
+            function updateBatchStats() {
+                const elapsed = (Date.now() - batchStartTime) / 1000;
+                let activeFrac = 0;
+                for (const p of Object.values(activeProgress)) {
+                    activeFrac += (p || 0) / 100;
+                }
+                const effectiveCompleted = completed + activeFrac;
+                let etaText = '';
+                if (effectiveCompleted > 0.01) {
+                    const avgPerVideo = elapsed / effectiveCompleted;
+                    const remaining = avgPerVideo * (total - effectiveCompleted);
+                    etaText = `  预计剩余: ${formatEta(remaining)}`;
+                }
+                batchStatsEl.textContent = `批量进度: ${completed}/${total}${etaText}`;
+            }
+
+            function downloadOne(bvid, btn) {
+                return new Promise(async (resolve) => {
+                    if (batchCancelled || skippedBvids.has(bvid)) {
+                        completed++;
+                        resolve();
+                        return;
+                    }
+
+                    activeProgress[bvid] = 0;
+                    await downloadVideo(bvid, btn, true);
+
+                    const taskId = bvidToTaskId[bvid];
+                    if (!taskId) {
+                        delete activeProgress[bvid];
+                        completed++;
+                        updateBatchStats();
+                        resolve();
+                        return;
+                    }
+
+                    const waitDone = setInterval(async () => {
+                        const resp = await fetch(`/api/download/status/${taskId}`);
+                        const task = await resp.json();
+
+                        activeProgress[bvid] = task.progress || 0;
+                        updateBatchStats();
+
+                        if (['done', 'error', 'cancelled'].includes(task.status)) {
+                            clearInterval(waitDone);
+                            delete activeProgress[bvid];
+                            completed++;
+                            updateBatchStats();
+                            resolve();
+                        }
+                    }, 1000);
+                });
+            }
+
+            // Run with concurrency limit
+            let index = 0;
+            async function runWorker() {
+                while (index < toDownload.length && !batchCancelled) {
+                    const i = index++;
+                    const { bvid, btn } = toDownload[i];
+                    await downloadOne(bvid, btn);
+                }
+            }
+
+            const workers = [];
+            for (let i = 0; i < Math.min(concurrency, toDownload.length); i++) {
+                workers.push(runWorker());
+            }
+            await Promise.all(workers);
+
+            cancelAllBtn.style.display = 'none';
+            batchStatsEl.textContent = batchCancelled ? '已取消' : `全部完成 (${completed}/${total})`;
+            setTimeout(() => { batchStatsEl.textContent = ''; }, 5000);
+        }
+
+        async function cancelBatch() {
+            batchCancelled = true;
+            // Cancel active downloads
+            for (const [bvid, taskId] of Object.entries(bvidToTaskId)) {
+                const btn = document.getElementById(`btn-${bvid}`);
+                if (btn && !btn.classList.contains('done') && !btn.classList.contains('error') && !btn.classList.contains('cancelled')) {
+                    await fetch(`/api/download/cancel/${taskId}`, { method: 'POST' });
+                }
+            }
+            // Cancel queued (not yet started) videos
+            document.querySelectorAll('.download-btn').forEach(btn => {
+                if (btn.textContent === '排队中...') {
+                    const bvid = btn.id.replace('btn-', '');
+                    skippedBvids.add(bvid);
+                    btn.textContent = '已取消';
+                    btn.classList.add('cancelled');
+                    btn.disabled = false;
+                    btn.onclick = () => { btn.classList.remove('cancelled'); downloadVideo(bvid, btn); };
+                    const cancelBtn = document.getElementById(`cancel-${bvid}`);
+                    if (cancelBtn) cancelBtn.style.display = 'none';
+                }
+            });
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return '0:00';
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function escHtml(str) {
+            const d = document.createElement('div');
+            d.textContent = str || '';
+            return d.innerHTML;
+        }
+
+        function formatEta(seconds) {
+            seconds = Math.round(seconds);
+            if (seconds < 60) return `${seconds}秒`;
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            if (m < 60) return `${m}分${s ? s + '秒' : ''}`;
+            const h = Math.floor(m / 60);
+            return `${h}时${m % 60}分`;
+        }
+
+        function formatDate(ts) {
+            if (!ts) return '';
+            const d = new Date(ts * 1000);
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        }
+
+        function formatSize(bytes) {
+            if (!bytes) return '';
+            if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB';
+            if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+            return (bytes / 1024).toFixed(0) + ' KB';
+        }
+
+        async function fetchVideoInfo(bvid) {
+            if (videoInfoCache[bvid]) {
+                renderVideoInfo(bvid, videoInfoCache[bvid]);
+                return;
+            }
+            try {
+                const resp = await fetch(`/api/video/info?bvid=${bvid}`);
+                const data = await resp.json();
+                if (data.error) {
+                    document.getElementById(`info-${bvid}`).textContent = '无法获取画质信息';
+                    return;
+                }
+                videoInfoCache[bvid] = data;
+                renderVideoInfo(bvid, data);
+            } catch {
+                const el = document.getElementById(`info-${bvid}`);
+                if (el) el.textContent = '';
+            }
+        }
+
+        function renderVideoInfo(bvid, data) {
+            const el = document.getElementById(`info-${bvid}`);
+            if (!el || !data.qualities || data.qualities.length === 0) {
+                if (el) el.textContent = '';
+                return;
+            }
+            const best = data.qualities[0];
+            let html = '';
+            if (best.width && best.height) {
+                html += `<span class="quality-tag">${best.width}x${best.height}</span>`;
+            }
+            html += `<span class="quality-tag">${best.label}</span>`;
+            if (best.size_bytes) {
+                html += `<span class="quality-tag">${formatSize(best.size_bytes)}</span>`;
+            }
+            if (data.qualities.length > 1) {
+                const others = data.qualities.slice(1, 4).map(q => q.label).join(', ');
+                html += `<br>可选: ${others}`;
+            }
+            el.innerHTML = html;
+        }
+
+        // Multi-select functions
+        function toggleSelect(bvid, checked) {
+            if (checked) {
+                selectedVideos.add(bvid);
+            } else {
+                selectedVideos.delete(bvid);
+            }
+            updateSelectedInfo();
+        }
+
+        function updateSelectedInfo() {
+            const el = document.getElementById('selected-info');
+            if (selectedVideos.size > 0) {
+                el.textContent = `已选 ${selectedVideos.size} 个`;
+            } else {
+                el.textContent = '';
+            }
+        }
+
+        function getVisibleVideos() {
+            const checkboxes = document.querySelectorAll('.select-check');
+            const visibleBvids = new Set([...checkboxes].map(cb => cb.dataset.bvid));
+            return allVideos.filter(v => v.attr !== 9 && visibleBvids.has(v.bvid));
+        }
+
+        function toggleSelectAll() {
+            const visible = getVisibleVideos();
+            const allSelected = visible.every(v => selectedVideos.has(v.bvid));
+
+            if (allSelected) {
+                visible.forEach(v => selectedVideos.delete(v.bvid));
+                document.querySelectorAll('.select-check').forEach(cb => cb.checked = false);
+            } else {
+                visible.forEach(v => selectedVideos.add(v.bvid));
+                document.querySelectorAll('.select-check').forEach(cb => cb.checked = true);
+            }
+            updateSelectedInfo();
+        }
+
+        async function downloadSelected() {
+            if (selectedVideos.size === 0) {
+                alert('请先选择要下载的视频');
+                return;
+            }
+            await batchDownload([...selectedVideos]);
+        }
+
+        // Download dir settings
+        let pickerCurrentPath = '';
+        let pickerCurrentDirs = [];
+        let pickerParent = null;
+        const homePath = '{{ home_dir }}';
+
+        async function loadDownloadDir() {
+            const resp = await fetch('/api/settings/download_dir');
+            const data = await resp.json();
+            document.getElementById('download-dir-display').textContent = data.download_dir || '';
+        }
+
+        function openFolderPicker() {
+            const current = document.getElementById('download-dir-display').textContent;
+            document.getElementById('folder-picker-modal').classList.add('open');
+            browseTo(current || '~');
+        }
+
+        function closeFolderPicker() {
+            document.getElementById('folder-picker-modal').classList.remove('open');
+        }
+
+        async function browseTo(path) {
+            const resp = await fetch(`/api/browse?path=${encodeURIComponent(path)}`);
+            const data = await resp.json();
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+            pickerCurrentPath = data.path;
+            pickerCurrentDirs = data.dirs;
+            pickerParent = data.parent;
+            document.getElementById('picker-path').textContent = data.path;
+            document.getElementById('picker-search').value = '';
+            renderPickerDirs(data.dirs);
+        }
+
+        function renderPickerDirs(dirs) {
+            let html = '';
+            if (pickerParent !== null) {
+                html += `<div class="dir-item parent-dir" onclick="browseTo('${escAttr(pickerParent)}')">
+                    <span class="icon">..</span><span>上级目录</span>
+                </div>`;
+            }
+            for (const name of dirs) {
+                const full = pickerCurrentPath + '/' + name;
+                html += `<div class="dir-item" onclick="browseTo('${escAttr(full)}')">
+                    <span class="icon">📁</span><span>${escHtml(name)}</span>
+                </div>`;
+            }
+            if (dirs.length === 0 && pickerParent !== null) {
+                html += '<div style="padding:20px;text-align:center;color:#999;">无匹配目录</div>';
+            }
+            document.getElementById('picker-dirs').innerHTML = html;
+        }
+
+        function filterDirs() {
+            const query = document.getElementById('picker-search').value.trim().toLowerCase();
+            if (!query) {
+                renderPickerDirs(pickerCurrentDirs);
+                return;
+            }
+            const filtered = pickerCurrentDirs.filter(name => name.toLowerCase().includes(query));
+            renderPickerDirs(filtered);
+        }
+
+        async function confirmFolderPicker() {
+            const resp = await fetch('/api/settings/download_dir', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ download_dir: pickerCurrentPath }),
+            });
+            const data = await resp.json();
+            if (data.error) {
+                alert('设置失败: ' + data.error);
+                return;
+            }
+            document.getElementById('download-dir-display').textContent = data.download_dir;
+            closeFolderPicker();
+        }
+
+        function escAttr(str) {
+            return str.replace(/'/g, "\\'").replace(/\\/g, '\\\\');
+        }
+
+        let activeFilter = null;
+
+        function applyFilter() {
+            const type = document.getElementById('filter-type').value;
+            const startStr = document.getElementById('filter-start').value;
+            const endStr = document.getElementById('filter-end').value;
+
+            if (!startStr && !endStr) {
+                alert('请选择至少一个日期');
+                return;
+            }
+
+            const startTs = startStr ? new Date(startStr).getTime() / 1000 : 0;
+            const endTs = endStr ? new Date(endStr + 'T23:59:59').getTime() / 1000 : Infinity;
+
+            activeFilter = { type, startTs, endTs };
+            rerenderVideos();
+        }
+
+        function clearFilter() {
+            activeFilter = null;
+            document.getElementById('filter-start').value = '';
+            document.getElementById('filter-end').value = '';
+            document.getElementById('filter-result').textContent = '';
+            rerenderVideos();
+        }
+
+        function rerenderVideos() {
+            const grid = document.getElementById('video-grid');
+            grid.innerHTML = '';
+            selectedVideos.clear();
+            updateSelectedInfo();
+
+            let filtered = allVideos;
+
+            // Apply search
+            const query = (document.getElementById('video-search')?.value || '').trim().toLowerCase();
+            if (query) {
+                filtered = filtered.filter(v =>
+                    (v.title || '').toLowerCase().includes(query) ||
+                    (v.upper || '').toLowerCase().includes(query)
+                );
+            }
+
+            // Apply date filter
+            if (activeFilter) {
+                filtered = filtered.filter(v => {
+                    const ts = v[activeFilter.type] || 0;
+                    return ts >= activeFilter.startTs && ts <= activeFilter.endTs;
+                });
+            }
+
+            // Update result counts
+            const parts = [];
+            if (query) parts.push(`搜索"${query}"`);
+            if (activeFilter) {
+                const label = activeFilter.type === 'fav_time' ? '收藏日期' : '发布日期';
+                parts.push(`按${label}筛选`);
+            }
+            const resultText = parts.length > 0 ? `${parts.join(' + ')}: ${filtered.length}/${allVideos.length} 个视频` : '';
+            document.getElementById('filter-result').textContent = activeFilter ? resultText : '';
+            document.getElementById('search-result').textContent = query ? resultText : '';
+
+            filtered.forEach(v => {
+                grid.insertAdjacentHTML('beforeend', renderCard(v));
+                if (v.attr !== 9) fetchVideoInfo(v.bvid);
+            });
+
+            updateBars();
+            document.getElementById('empty-state').style.display = filtered.length === 0 ? 'block' : 'none';
+            document.getElementById('total-count').textContent = filtered.length;
+        }
+
+        let searchTimer = null;
+        function debouncedSearch() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(applySearchAndFilter, 300);
+        }
+
+        function applySearchAndFilter() {
+            rerenderVideos();
+        }
+
+        loadFolders();
+        loadDownloadDir();
+    </script>
+</body>
+</html>
