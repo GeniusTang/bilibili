@@ -1,14 +1,20 @@
+import hashlib
 import io
 import json
 import os
 import base64
+import re as _re
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
+from functools import lru_cache
+from urllib.parse import urlencode
 
 import qrcode
 import requests
+from curl_cffi import requests as cffi_requests
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
 from flask import Flask, render_template, jsonify, request, session, redirect, url_for
@@ -41,23 +47,174 @@ HEADERS = {
 }
 
 
-def bili_request(url, params=None, cookies=None):
-    """Make a request to Bilibili API with proper headers."""
-    resp = requests.get(url, params=params, headers=HEADERS, cookies=cookies, timeout=15)
+WBI_MIXIN_KEY_ENC_TAB = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
+    27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 44, 14, 39, 12, 38, 41,
+    13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30,
+    4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 52,
+]
+
+# Cache Wbi keys for 10 minutes
+_wbi_cache = {"keys": None, "ts": 0}
+
+
+def _get_wbi_keys(cookies):
+    """Fetch img_key and sub_key from Bilibili nav API."""
+    now = time.time()
+    if _wbi_cache["keys"] and now - _wbi_cache["ts"] < 600:
+        return _wbi_cache["keys"]
+
+    try:
+        resp = requests.get(
+            "https://api.bilibili.com/x/web-interface/nav",
+            headers=HEADERS,
+            cookies=cookies,
+            timeout=15,
+        )
+        data = resp.json()
+        wbi_img = data["data"]["wbi_img"]
+        img_key = wbi_img["img_url"].split("/")[-1].split(".")[0]
+        sub_key = wbi_img["sub_url"].split("/")[-1].split(".")[0]
+    except Exception:
+        # Fallback: return empty keys so requests proceed unsigned
+        return ("", "")
+    _wbi_cache["keys"] = (img_key, sub_key)
+    _wbi_cache["ts"] = now
+    return img_key, sub_key
+
+
+def _get_mixin_key(img_key, sub_key):
+    raw = img_key + sub_key
+    return "".join(raw[i] for i in WBI_MIXIN_KEY_ENC_TAB)[:32]
+
+
+def _sign_wbi(params, cookies):
+    """Sign params with Wbi for Bilibili API anti-bot."""
+    img_key, sub_key = _get_wbi_keys(cookies)
+    mixin_key = _get_mixin_key(img_key, sub_key)
+    params = dict(params or {})
+    params["wts"] = int(time.time())
+    # Filter out reserved chars from values
+    params = {
+        k: _re.sub(r"[!'()*]", "", str(v))
+        for k, v in sorted(params.items())
+    }
+    query = urlencode(params)
+    params["w_rid"] = hashlib.md5((query + mixin_key).encode()).hexdigest()
+    return params
+
+
+_cffi_session = cffi_requests.Session(impersonate="chrome")
+_cffi_session_ready = False
+_last_request_time = 0
+_REQUEST_INTERVAL = 0.3  # minimum seconds between requests
+
+
+def _ensure_cffi_session():
+    """Initialize the curl_cffi session by visiting bilibili.com for cookies."""
+    global _cffi_session_ready
+    if _cffi_session_ready:
+        return
+    try:
+        _cffi_session.get("https://www.bilibili.com", headers=HEADERS, timeout=15)
+        fp = _cffi_session.get(
+            "https://api.bilibili.com/x/frontend/finger/spi",
+            headers=HEADERS, timeout=15,
+        ).json()
+        if fp.get("data"):
+            _cffi_session.cookies.set("buvid3", fp["data"]["b_3"], domain=".bilibili.com")
+            _cffi_session.cookies.set("buvid4", fp["data"]["b_4"], domain=".bilibili.com")
+    except Exception:
+        pass
+    _cffi_session_ready = True
+
+
+def bili_request(url, params=None, cookies=None, sign=True):
+    """Make a request to Bilibili API with browser-like TLS fingerprint."""
+    global _last_request_time
+
+    _ensure_cffi_session()
+
+    if sign and cookies and "api.bilibili.com" in url:
+        params = _sign_wbi(params or {}, cookies)
+
+    # Rate limit requests
+    now = time.time()
+    wait = _REQUEST_INTERVAL - (now - _last_request_time)
+    if wait > 0:
+        time.sleep(wait)
+    _last_request_time = time.time()
+
+    resp = _cffi_session.get(
+        url, params=params, headers=HEADERS, cookies=cookies, timeout=15
+    )
+    if resp.status_code == 412:
+        app.logger.warning("412 for %s, retrying with fresh Wbi keys", url)
+        _wbi_cache["ts"] = 0
+        if sign and cookies:
+            params_orig = {k: v for k, v in (params or {}).items() if k not in ("wts", "w_rid")}
+            params = _sign_wbi(params_orig, cookies)
+            time.sleep(1)
+            resp = _cffi_session.get(
+                url, params=params, headers=HEADERS, cookies=cookies, timeout=15
+            )
+    if resp.status_code == 412:
+        return {"code": -412, "message": "请求被限制，请稍后再试", "data": None}
     resp.raise_for_status()
     return resp.json()
 
 
 def get_cookies_dict():
-    """Get cookies from session."""
-    return session.get("cookies", {})
+    """Get cookies from session, including fingerprint cookies."""
+    cookies = dict(session.get("cookies", {}))
+    fp = session.get("fingerprint_cookies", {})
+    for k, v in fp.items():
+        cookies.setdefault(k, v)
+    return cookies
+
+
+def _init_fingerprint_cookies():
+    """Fetch buvid3/buvid4 fingerprint cookies from Bilibili."""
+    if session.get("fingerprint_cookies"):
+        return
+    try:
+        resp = _cffi_session.get(
+            "https://api.bilibili.com/x/frontend/finger/spi",
+            headers=HEADERS,
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("code") == 0 and data.get("data"):
+            session["fingerprint_cookies"] = {
+                "buvid3": data["data"].get("b_3", ""),
+                "buvid4": data["data"].get("b_4", ""),
+            }
+    except Exception:
+        pass
+
+
+_DOWNLOAD_DIR_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".download_dir")
 
 
 def get_download_dir():
-    """Get the current download directory from session or default."""
-    d = session.get("download_dir", DEFAULT_DOWNLOAD_DIR)
-    os.makedirs(d, exist_ok=True)
-    return d
+    """Get the current download directory."""
+    if os.path.exists(_DOWNLOAD_DIR_FILE):
+        with open(_DOWNLOAD_DIR_FILE, "r") as f:
+            d = f.read().strip()
+            if d:
+                try:
+                    os.makedirs(d, exist_ok=True)
+                    return d
+                except OSError:
+                    pass
+    os.makedirs(DEFAULT_DOWNLOAD_DIR, exist_ok=True)
+    return DEFAULT_DOWNLOAD_DIR
+
+
+def set_download_dir(path):
+    """Save the download directory."""
+    with open(_DOWNLOAD_DIR_FILE, "w") as f:
+        f.write(path)
 
 
 # ── Auth routes ──
@@ -129,6 +286,7 @@ def poll_qrcode():
         session.permanent = True
         session["logged_in"] = True
         session["uid"] = cookies.get("DedeUserID", "")
+        _init_fingerprint_cookies()
         result["success"] = True
 
     return jsonify(result)
@@ -252,8 +410,10 @@ def _finish_password_login(s, login_data):
         return jsonify({"error": "登录成功但未获取到凭证，请尝试二维码登录"}), 400
 
     session["cookies"] = cookies
+    session.permanent = True
     session["logged_in"] = True
     session["uid"] = cookies.get("DedeUserID", "")
+    _init_fingerprint_cookies()
     session.pop("tmp_token", None)
     session.pop("tmp_cookies", None)
 
@@ -424,7 +584,7 @@ def set_download_dir_setting():
         os.makedirs(path, exist_ok=True)
     except OSError as e:
         return jsonify({"error": f"无法创建目录: {e}"}), 400
-    session["download_dir"] = path
+    set_download_dir(path)
     return jsonify({"download_dir": path})
 
 
@@ -567,7 +727,7 @@ def start_download():
 
     # Save cookies to a temp file for yt-dlp
     cookies = get_cookies_dict()
-    cookie_file = os.path.join(download_dir, f".cookies_{task_id}.txt")
+    cookie_file = os.path.join(tempfile.gettempdir(), f".cookies_{task_id}.txt")
     _write_cookie_file(cookie_file, cookies)
 
     thread = threading.Thread(
@@ -587,6 +747,63 @@ def _write_cookie_file(path, cookies):
             f.write(f".bilibili.com\tTRUE\t/\tFALSE\t0\t{name}\t{value}\n")
 
 
+def _embed_video_thumbnail(mp4_path):
+    """Extract a frame from the video and embed it as cover art thumbnail.
+
+    Uses mutagen to write a 'covr' atom (works on both macOS and Windows).
+    Falls back to ffmpeg attached_pic if mutagen is unavailable.
+    """
+    try:
+        thumb_path = mp4_path + ".thumb.jpg"
+        # Extract a frame at 5 seconds from the video itself
+        subprocess.run(
+            ["/opt/homebrew/bin/ffmpeg", "-y", "-i", mp4_path,
+             "-ss", "5", "-vframes", "1", "-q:v", "2", thumb_path],
+            capture_output=True, timeout=30,
+        )
+        if not os.path.exists(thumb_path):
+            return
+
+        embedded = False
+        # Preferred: mutagen writes covr atom (Windows + macOS compatible)
+        try:
+            from mutagen.mp4 import MP4, MP4Cover
+            video = MP4(mp4_path)
+            with open(thumb_path, "rb") as f:
+                thumb_data = f.read()
+            video["covr"] = [MP4Cover(thumb_data, imageformat=MP4Cover.FORMAT_JPEG)]
+            video.save()
+            embedded = True
+        except Exception:
+            pass
+
+        # Fallback: ffmpeg attached_pic (works on macOS Finder)
+        if not embedded:
+            tmp_path = mp4_path + ".tmp.mp4"
+            subprocess.run(
+                ["/opt/homebrew/bin/ffmpeg", "-y",
+                 "-i", mp4_path,
+                 "-i", thumb_path,
+                 "-map", "0", "-map", "1",
+                 "-c", "copy",
+                 "-disposition:v:1", "attached_pic",
+                 "-movflags", "+faststart",
+                 tmp_path],
+                capture_output=True, timeout=120,
+            )
+            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                os.replace(tmp_path, mp4_path)
+            else:
+                try: os.remove(tmp_path)
+                except OSError: pass
+
+        # Clean up thumbnail file
+        try: os.remove(thumb_path)
+        except OSError: pass
+    except Exception:
+        pass  # Thumbnail embedding is best-effort
+
+
 def _download_worker(task_id, bvid, cookie_file, download_dir):
     """Run yt-dlp in a subprocess and track progress."""
     task = download_tasks[task_id]
@@ -596,10 +813,12 @@ def _download_worker(task_id, bvid, cookie_file, download_dir):
     cmd = [
         venv_python,
         "--cookies", cookie_file,
+        "--no-playlist",
         "-f", "bestvideo+bestaudio/best",
         "--ffmpeg-location", "/opt/homebrew/bin/ffmpeg",
         "-o", os.path.join(download_dir, "%(title)s.%(ext)s"),
         "--merge-output-format", "mp4",
+        "--ppa", "ffmpeg:-movflags +faststart",
         "--newline",
         url,
     ]
@@ -614,6 +833,8 @@ def _download_worker(task_id, bvid, cookie_file, download_dir):
         )
         download_procs[task_id] = proc
 
+        import re
+        output_file = None
         for line in proc.stdout:
             line = line.strip()
             if "[download]" in line and "%" in line:
@@ -623,7 +844,6 @@ def _download_worker(task_id, bvid, cookie_file, download_dir):
                 except (ValueError, IndexError):
                     pass
                 # Parse speed: e.g. "1.23MiB/s"
-                import re
                 speed_match = re.search(r'(\d+\.?\d*\s*[KMG]i?B/s)', line)
                 if speed_match:
                     task["speed"] = speed_match.group(1)
@@ -631,15 +851,38 @@ def _download_worker(task_id, bvid, cookie_file, download_dir):
                 eta_match = re.search(r'ETA\s+(\S+)', line)
                 if eta_match:
                     task["eta"] = eta_match.group(1)
-            if "[Merger]" in line or "[ExtractAudio]" in line:
+            # Capture output filename from Merger or download destination
+            if "[Merger]" in line:
                 task["status"] = "merging"
                 task["speed"] = ""
                 task["eta"] = ""
+                m = re.search(r'Merging formats into "(.+?)"', line)
+                if m:
+                    output_file = m.group(1)
+            elif "[ExtractAudio]" in line:
+                task["status"] = "merging"
+                task["speed"] = ""
+                task["eta"] = ""
+            # Also capture from [download] Destination: lines
+            if "[download] Destination:" in line:
+                dest = line.split("[download] Destination:", 1)[1].strip()
+                if dest.endswith(".mp4"):
+                    output_file = dest
 
         proc.wait()
         if task["status"] == "cancelled":
             pass  # already set
         elif proc.returncode == 0:
+            # Embed a thumbnail extracted from the video itself
+            if output_file and os.path.exists(output_file):
+                _embed_video_thumbnail(output_file)
+            elif not output_file:
+                # Fallback: find most recent mp4 in download dir
+                import glob as _glob
+                mp4s = sorted(_glob.glob(os.path.join(download_dir, "*.mp4")),
+                              key=os.path.getmtime, reverse=True)
+                if mp4s:
+                    _embed_video_thumbnail(mp4s[0])
             task["status"] = "done"
             task["progress"] = 100
             task["speed"] = ""
@@ -696,4 +939,4 @@ def cancel_download(task_id):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, threaded=True)

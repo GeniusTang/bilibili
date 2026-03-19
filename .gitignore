@@ -5,3 +5,4 @@ cookies.txt
 .DS_Store
 downloads/
 .secret_key
+.download_dir

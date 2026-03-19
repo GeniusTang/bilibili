@@ -685,7 +685,8 @@
             hasMore = data.has_more;
             rerenderVideos();
 
-            // Load remaining pages in background
+            // Load remaining pages in background, append without re-rendering
+            const grid = document.getElementById('video-grid');
             let page = 1;
             while (hasMore) {
                 page++;
@@ -694,10 +695,14 @@
                 if (d.error) break;
                 allVideos = allVideos.concat(d.videos);
                 hasMore = d.has_more;
+                d.videos.forEach(v => {
+                    grid.insertAdjacentHTML('beforeend', renderCard(v));
+                    if (v.attr !== 9) fetchVideoInfo(v.bvid);
+                });
             }
             hasMore = false;
             document.getElementById('load-more').style.display = 'none';
-            rerenderVideos();
+            document.getElementById('total-count').textContent = allVideos.length;
         }
 
         function updateBars() {
@@ -1029,23 +1034,43 @@
             return (bytes / 1024).toFixed(0) + ' KB';
         }
 
-        async function fetchVideoInfo(bvid) {
+        let infoQueue = [];
+        let infoActive = 0;
+        const INFO_CONCURRENCY = 3;
+
+        function fetchVideoInfo(bvid) {
             if (videoInfoCache[bvid]) {
                 renderVideoInfo(bvid, videoInfoCache[bvid]);
                 return;
             }
-            try {
-                const resp = await fetch(`/api/video/info?bvid=${bvid}`);
-                const data = await resp.json();
-                if (data.error) {
-                    document.getElementById(`info-${bvid}`).textContent = '无法获取画质信息';
-                    return;
+            infoQueue.push(bvid);
+            processInfoQueue();
+        }
+
+        async function processInfoQueue() {
+            while (infoQueue.length > 0 && infoActive < INFO_CONCURRENCY) {
+                const bvid = infoQueue.shift();
+                if (videoInfoCache[bvid]) {
+                    renderVideoInfo(bvid, videoInfoCache[bvid]);
+                    continue;
                 }
-                videoInfoCache[bvid] = data;
-                renderVideoInfo(bvid, data);
-            } catch {
-                const el = document.getElementById(`info-${bvid}`);
-                if (el) el.textContent = '';
+                infoActive++;
+                try {
+                    const resp = await fetch(`/api/video/info?bvid=${bvid}`);
+                    const data = await resp.json();
+                    if (data.error) {
+                        const el = document.getElementById(`info-${bvid}`);
+                        if (el) el.textContent = '无法获取画质信息';
+                    } else {
+                        videoInfoCache[bvid] = data;
+                        renderVideoInfo(bvid, data);
+                    }
+                } catch {
+                    const el = document.getElementById(`info-${bvid}`);
+                    if (el) el.textContent = '';
+                }
+                infoActive--;
+                processInfoQueue();
             }
         }
 
